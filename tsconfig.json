@@ -6,6 +6,7 @@
     "esModuleInterop": true,
     "sourceMap": true,
     "allowJs": true,
+    "target": "ES6",
     "lib": [
       "es6",
       "dom"
