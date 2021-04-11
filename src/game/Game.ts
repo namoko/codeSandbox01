@@ -1,10 +1,11 @@
 import { Movable } from "../Movable";
 import { Maze } from "./Maze";
-
-const updateFrequnce = 17;
-const cellSize = 30;
+import { Box } from "./Box";
+import { cellSize } from "./consts";
 
 export class Game {
+  private wallImage = new Image();
+
   private maze = new Maze();
   private staticCanvas = document.createElement("canvas");
   private staticCtx = this.staticCanvas.getContext("2d");
@@ -16,6 +17,7 @@ export class Game {
   private playerY = this.maze.startPoint.y;
 
   private player = new Movable();
+  private boxes: Box[] = [];
 
   private playerIsMoving = false;
 
@@ -25,6 +27,10 @@ export class Game {
   private lastTime: number | undefined;
 
   constructor(container: HTMLElement) {
+    this.wallImage.src =
+      "http://labs.phaser.io/assets/tilemaps/tiles/kenney_redux_64x64.png";
+    this.wallImage.onload = this.drawStatic;
+
     const canvasWidth = this.maze.layout[0].length * cellSize;
     const canvasHeight = this.maze.layout.length * cellSize;
 
@@ -40,6 +46,11 @@ export class Game {
     this.player.x = this.playerX * cellSize;
     this.player.y = this.playerY * cellSize;
 
+    this.maze.boxes.forEach((cell) => {
+      const box = new Box(cell[0], cell[1]);
+      this.boxes.push(box);
+    });
+
     container.appendChild(this.staticCanvas);
     container.appendChild(this.playerCanvas);
 
@@ -49,13 +60,9 @@ export class Game {
     window.addEventListener("gamepadconnected", this.onGamePadConnect);
     window.addEventListener("gamepaddisconnected", this.onGamePadDisconnect);
     window.addEventListener("x-gamepad:change", this.onGamePadChange);
-    // const gpds = navigator.getGamepads();
-    // console.log("gpds", gpds);
 
     this.redrawAll();
 
-    // window.setInterval(this.onTimer, updateFrequnce);
-    // window.setInterval(this.scanGamePads, 500);
     window.requestAnimationFrame(this.onFrame);
   }
 
@@ -88,24 +95,11 @@ export class Game {
     this.update(dt);
   };
 
-  // private scanGamePads = () => {
-  //   const gs = navigator.getGamepads();
-  //   for (let i = 0; i < 4; i++) {
-  //     const g = gs[i] as Gamepad;
-  //     if (g) this.gamepads[g.index] = g;
-  //   }
-  // };
-
-  // private onTimer = () => {
-  //   const dt = updateFrequnce * 0.001;
-  //   this.update(dt);
-  // };
   private update(dt: number) {
     this.player.update(dt);
+    this.boxes.forEach((b) => b.update(dt));
 
-    if (this.playerCtx) {
-      this.drawPlayer(this.playerCtx);
-    }
+    this.drawDynamic();
 
     if (!this.playerIsMoving) {
       if (this.pressedKeys.KeyA) {
@@ -150,7 +144,11 @@ export class Game {
     const newX = this.playerX + dx;
     const newY = this.playerY + dy;
 
-    if (!this.canMoveTo(newX, newY)) return;
+    if (!this.canMoveTo(dx, dy)) return;
+    const box = this.getBoxAt(newX, newY);
+    if (box) {
+      box.moveToCell(newX + dx, newY + dy);
+    }
 
     this.playerX = newX;
     this.playerY = newY;
@@ -162,8 +160,27 @@ export class Game {
     this.player.moveTo(x, y, this.onMoveEnd);
   }
 
-  private canMoveTo(x: number, y: number) {
-    return this.maze.layout[y][x] === 0;
+  private canMoveTo(dx: number, dy: number) {
+    const x = this.playerX + dx;
+    const y = this.playerY + dy;
+    // wall
+    if (this.hasWallAt(x, y)) return false;
+    if (this.getBoxAt(x, y)) {
+      const nextX = x + dx;
+      const nextY = y + dy;
+      if (this.hasWallAt(nextX, nextY) || this.getBoxAt(nextX, nextY))
+        return false;
+    }
+    return true;
+  }
+
+  private hasWallAt(x: number, y: number) {
+    return this.maze.layout[y][x] === 1;
+  }
+  private getBoxAt(x: number, y: number) {
+    for (const box of this.boxes) {
+      if (box.cellX === x && box.cellY === y) return box;
+    }
   }
 
   private onMoveEnd = () => {
@@ -171,35 +188,61 @@ export class Game {
   };
 
   private redrawAll() {
-    if (this.staticCtx) {
-      this.drawLevel(this.staticCtx);
-    }
+    this.drawStatic();
 
-    if (this.playerCtx) {
-      this.drawPlayer(this.playerCtx);
-    }
+    this.drawDynamic();
   }
 
-  private drawLevel(ctx: CanvasRenderingContext2D) {
+  private drawStatic = () => {
+    const ctx = this.staticCtx;
+    if (!ctx) return;
+
     ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
     this.maze.layout.forEach((l, j) => {
       let y = j * cellSize;
       l.forEach((e, i) => {
         let x = i * cellSize;
-        ctx.fillStyle = e === 1 ? "#aaa" : "#eee";
-        ctx.fillRect(x, y, cellSize, cellSize);
+        if (e === 1) {
+          ctx.drawImage(
+            this.wallImage,
+            11 * 64,
+            1 * 64,
+            64,
+            64,
+            x,
+            y,
+            cellSize,
+            cellSize
+          );
+        }
       });
     });
-  }
+  };
 
-  private drawPlayer(ctx: CanvasRenderingContext2D) {
+  private drawDynamic() {
+    const ctx = this.playerCtx;
+    if (!ctx) return;
+
     const { x, y } = this.player;
-    // console.log("drawPlayer", x, y);
     const halfCell = cellSize / 2;
     ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
     ctx.fillStyle = "red";
     ctx.beginPath();
     ctx.arc(x + halfCell, y + halfCell, halfCell, 0, Math.PI * 2);
     ctx.fill();
+
+    this.boxes.forEach((b) => {
+      ctx.drawImage(
+        this.wallImage,
+        7 * 64,
+        3 * 64,
+        64,
+        64,
+        b.x,
+        b.y,
+        cellSize,
+        cellSize
+      );
+    });
   }
 }
